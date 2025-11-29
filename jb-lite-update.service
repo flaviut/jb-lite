@@ -1,0 +1,11 @@
+[Unit]
+Description=JetBrains Lite Auto-Update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/jb-lite update
+
+[Install]
+WantedBy=default.target

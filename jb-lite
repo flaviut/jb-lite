@@ -51,11 +51,13 @@ CACHE_TTL = 86400  # 24 Hours in seconds
 PRODUCTS_URL = "https://data.services.jetbrains.com/products"
 
 class Colors:
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
+    # Check if stderr is a TTY; if not (e.g. systemd/cron), disable colors
+    _enabled = sys.stderr.isatty()
+    GREEN = '\033[92m' if _enabled else ''
+    YELLOW = '\033[93m' if _enabled else ''
+    RED = '\033[91m' if _enabled else ''
+    RESET = '\033[0m' if _enabled else ''
+    BOLD = '\033[1m' if _enabled else ''
 
 def log(msg: str, color: str = Colors.RESET):
     """Prints status messages to stderr to avoid polluting stdout."""

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run JetBrains Lite Auto-Update Weekly
+
+[Timer]
+# Run weekly on Monday at 3:00 AM
+OnCalendar=Wed *-*-* 03:00:00
+# If the machine was off, run it immediately upon boot
+Persistent=true
+
+[Install]
+WantedBy=timers.target
