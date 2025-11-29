@@ -267,7 +267,7 @@ def parse_product_info(install_path: Path) -> Dict[str, Any]:
             launch_config = entry
             break
     
-    # Fallback: if amd64, sometimes 'arch' key is missing in older JSONs implying x64
+    # Fallback: may or may not be needed
     if not launch_config and CURRENT_ARCH == 'amd64':
         for entry in launch_entries:
             if entry.get("os") == "Linux" and "arch" not in entry:
@@ -319,7 +319,7 @@ Type=Application
 Name={metadata['name']} ({metadata['version']})
 Icon={icon_path_str}
 Exec="{exec_path}" %f
-Comment={metadata['name']} managed by JetBrains Lite
+Comment={metadata['name']}
 Categories=Development;IDE;
 Terminal=false
 StartupWMClass={metadata['wm_class']}
