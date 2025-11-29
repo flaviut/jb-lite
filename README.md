@@ -39,3 +39,10 @@ This sets up a systemd user timer to update your IDEs weekly (Wednesdays at 3 AM
     curl -sL https://raw.githubusercontent.com/flaviut/jb-lite/main/jb-lite-update.timer -o ~/.config/systemd/user/jb-lite-update.timer
     systemctl --user daemon-reload
     systemctl --user enable --now jb-lite-update.timer
+
+## Usage
+
+See `jb-lite help` for usage.
+
+- `jb-lite list` to list availible IDEs
+- `jb-lite install` to install a new IDE
