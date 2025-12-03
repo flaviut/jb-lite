@@ -24,6 +24,17 @@ import urllib.error
 import platform
 from pathlib import Path
 from typing import Dict, Optional, Any, List
+import gzip
+
+try:
+    import brotli
+except ImportError:
+    brotli = None
+
+try:
+    import compression.zstd as zstd
+except ImportError:
+    zstd = None
 
 # --- Configuration ---
 
@@ -50,39 +61,71 @@ CACHE_TTL = 86400  # 24 Hours in seconds
 
 PRODUCTS_URL = "https://data.services.jetbrains.com/products"
 
+
 class Colors:
     # Check if stderr is a TTY; if not (e.g. systemd/cron), disable colors
     _enabled = sys.stderr.isatty()
-    GREEN = '\033[92m' if _enabled else ''
-    YELLOW = '\033[93m' if _enabled else ''
-    RED = '\033[91m' if _enabled else ''
-    RESET = '\033[0m' if _enabled else ''
-    BOLD = '\033[1m' if _enabled else ''
+    GREEN = "\033[92m" if _enabled else ""
+    YELLOW = "\033[93m" if _enabled else ""
+    RED = "\033[91m" if _enabled else ""
+    RESET = "\033[0m" if _enabled else ""
+    BOLD = "\033[1m" if _enabled else ""
+
 
 def log(msg: str, color: str = Colors.RESET):
     """Prints status messages to stderr to avoid polluting stdout."""
     print(f"{color}{msg}{Colors.RESET}", file=sys.stderr)
 
+
 def error(msg: str):
     log(f"Error: {msg}", Colors.RED)
     sys.exit(1)
 
+
 # --- System Helpers ---
+
 
 def get_system_arch() -> str:
     """Returns 'amd64' or 'arm64' normalized for JetBrains logic."""
     machine = platform.machine().lower()
-    if machine in ['x86_64', 'amd64']:
-        return 'amd64'
-    elif machine in ['aarch64', 'arm64']:
-        return 'arm64'
+    if machine in ["x86_64", "amd64"]:
+        return "amd64"
+    elif machine in ["aarch64", "arm64"]:
+        return "arm64"
     else:
         error(f"Unsupported architecture: {machine}")
-        return 'unknown'
+        return "unknown"
+
 
 CURRENT_ARCH = get_system_arch()
 
 # --- Data Fetching & Caching ---
+
+
+def fetch_data(url, timeout=10):
+    encodings = ["gzip"]
+    if brotli:
+        encodings.append("br")
+    if zstd:
+        encodings.append("zstd")
+
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", "JetBrains-Lite-CLI")
+    req.add_header("Accept-Encoding", ", ".join(encodings))
+
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        data = response.read()
+        encoding = response.info().get("Content-Encoding")
+
+        if encoding == "gzip":
+            data = gzip.decompress(data)
+        elif encoding == "br" and brotli:
+            data = brotli.decompress(data)
+        elif encoding == "zstd" and zstd:
+            data = zstd.decompress(data)
+
+        return json.loads(data.decode())
+
 
 def get_product_data() -> Dict[str, Any]:
     """
@@ -94,41 +137,39 @@ def get_product_data() -> Dict[str, Any]:
         mtime = CACHE_FILE.stat().st_mtime
         if time.time() - mtime < CACHE_TTL:
             try:
-                with open(CACHE_FILE, 'r') as f:
+                with open(CACHE_FILE, "r") as f:
                     raw_list = json.load(f)
                     return process_product_list(raw_list)
             except json.JSONDecodeError:
-                pass # Cache corrupted, ignore
+                pass  # Cache corrupted, ignore
 
     # Fetch from API
     log("Refreshing product data from JetBrains...", Colors.YELLOW)
     try:
-        req = urllib.request.Request(PRODUCTS_URL)
-        req.add_header('User-Agent', 'JetBrains-Lite-CLI')
-        with urllib.request.urlopen(req) as response:
-            raw_data = json.loads(response.read().decode())
-            
-            # Save to cache
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            with open(CACHE_FILE, 'w') as f:
-                json.dump(raw_data, f)
-            
-            return process_product_list(raw_data)
+        raw_data = fetch_data(PRODUCTS_URL)
+
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CACHE_FILE, "w") as f:
+            json.dump(raw_data, f)
+
+        return process_product_list(raw_data)
     except Exception as e:
         # If fetch fails, try to read stale cache
         if CACHE_FILE.exists():
             log(f"Network failed ({e}), using stale cache.", Colors.RED)
-            with open(CACHE_FILE, 'r') as f:
+            with open(CACHE_FILE, "r") as f:
                 return process_product_list(json.load(f))
         error(f"Failed to fetch product data: {e}")
         return {}
 
+
 def generate_slug(name: str) -> str:
     """Converts 'IntelliJ IDEA Ultimate' to 'intellij-idea-ultimate'."""
     slug = name.lower()
-    slug = slug.replace(" edition", "") # Remove 'edition' noise
+    slug = slug.replace(" edition", "")  # Remove 'edition' noise
     slug = slug.replace(" ", "-")
     return slug
+
 
 def process_product_list(raw_list: List[Dict]) -> Dict[str, Any]:
     """
@@ -136,33 +177,35 @@ def process_product_list(raw_list: List[Dict]) -> Dict[str, Any]:
     We no longer guess binaries here; we only store release data.
     """
     products = {}
-    
+
     for item in raw_list:
         # Filter for IDEs
         if "categories" not in item or "IDE" not in item["categories"]:
             continue
-            
+
         code = item.get("code")
         name = item.get("name")
-        
+
         if not code or not name:
             continue
 
         slug = generate_slug(name)
-        
+
         products[slug] = {
             "code": code,
             "name": name,
             "slug": slug,
-            "releases": item.get("releases", [])
+            "releases": item.get("releases", []),
         }
-    
+
     return products
+
 
 # Load products immediately for CLI usage
 PRODUCTS = get_product_data()
 
 # --- Core Logic ---
+
 
 def get_latest_linux_release(product_slug: str) -> Optional[Dict[str, Any]]:
     """
@@ -170,7 +213,7 @@ def get_latest_linux_release(product_slug: str) -> Optional[Dict[str, Any]]:
     """
     product = PRODUCTS[product_slug]
     releases = product.get("releases", [])
-    
+
     if not releases:
         return None
 
@@ -182,61 +225,63 @@ def get_latest_linux_release(product_slug: str) -> Optional[Dict[str, Any]]:
     for release in releases:
         if release.get("type") == "release":
             downloads = release.get("downloads", {})
-            
+
             if target_key in downloads:
                 return {
                     "version": release["version"],
                     "build": release["build"],
                     "url": downloads[target_key]["link"],
                     "checksum": downloads[target_key].get("checksumLink"),
-                    "arch_key": target_key
+                    "arch_key": target_key,
                 }
-    
+
     return None
+
 
 def get_installed_info(product_slug: str) -> Optional[Dict[str, Any]]:
     """Check local install directory for product-info.json."""
     install_path = INSTALL_DIR / product_slug
     info_path = install_path / "product-info.json"
-    
+
     if not info_path.exists():
         return None
 
     try:
         data = json.loads(info_path.read_text())
-        return {
-            "version": data.get("version"),
-            "build": data.get("buildNumber")
-        }
+        return {"version": data.get("version"), "build": data.get("buildNumber")}
     except json.JSONDecodeError:
         return None
+
 
 def download_file(url: str, dest_path: Path):
     """Download file with a simple progress bar."""
     try:
         with urllib.request.urlopen(url) as response:
-            total_size = int(response.info().get('Content-Length', 0).strip())
-            block_size = 2 ** 20
+            total_size = int(response.info().get("Content-Length", 0).strip())
+            block_size = 2**20
             downloaded = 0
-            
+
             log(f"Downloading {url}...", Colors.YELLOW)
-            with open(dest_path, 'wb') as f:
+            with open(dest_path, "wb") as f:
                 while True:
                     buffer = response.read(block_size)
                     if not buffer:
                         break
                     downloaded += len(buffer)
                     f.write(buffer)
-                    
+
                     if total_size > 0:
                         percent = downloaded * 100 / total_size
-                        sys.stdout.write(f"\rProgress: [{int(percent)}%] {downloaded // (1024*1024)}MB")
+                        sys.stdout.write(
+                            f"\rProgress: [{int(percent)}%] {downloaded // (1024 * 1024)}MB"
+                        )
                         sys.stdout.flush()
-            print() 
+            print()
     except Exception as e:
         if dest_path.exists():
             dest_path.unlink()
         error(f"Download failed: {e}")
+
 
 def parse_product_info(install_path: Path) -> Dict[str, Any]:
     """
@@ -259,37 +304,42 @@ def parse_product_info(install_path: Path) -> Dict[str, Any]:
     # Find the launch config matching Linux and current Arch
     # Normalize: JSON often uses 'aarch64', script uses 'arm64'
     valid_archs = {CURRENT_ARCH}
-    if CURRENT_ARCH == 'arm64':
-        valid_archs.add('aarch64')
-    elif CURRENT_ARCH == 'amd64':
-        valid_archs.add('x86_64')
+    if CURRENT_ARCH == "arm64":
+        valid_archs.add("aarch64")
+    elif CURRENT_ARCH == "amd64":
+        valid_archs.add("x86_64")
 
     for entry in launch_entries:
         if entry.get("os") == "Linux" and entry.get("arch") in valid_archs:
             launch_config = entry
             break
-    
+
     # Fallback: may or may not be needed
-    if not launch_config and CURRENT_ARCH == 'amd64':
+    if not launch_config and CURRENT_ARCH == "amd64":
         for entry in launch_entries:
             if entry.get("os") == "Linux" and "arch" not in entry:
                 launch_config = entry
                 break
-    
+
     if not launch_config:
-        error(f"No launch configuration found for Linux {CURRENT_ARCH} in product-info.json")
+        error(
+            f"No launch configuration found for Linux {CURRENT_ARCH} in product-info.json"
+        )
 
     return {
         "name": data.get("name"),
         "version": data.get("version"),
         "svg_icon": data.get("svgIconPath"),
         "launcher_path": launch_config.get("launcherPath"),
-        "wm_class": launch_config.get("startupWmClass")
+        "wm_class": launch_config.get("startupWmClass"),
     }
 
-def create_desktop_entry(product_slug: str, install_path: Path, metadata: Dict[str, Any]):
+
+def create_desktop_entry(
+    product_slug: str, install_path: Path, metadata: Dict[str, Any]
+):
     """Generate a .desktop file using metadata from product-info.json."""
-    
+
     # Resolve paths relative to install directory
     exec_path = install_path / metadata["launcher_path"]
     icon_path = install_path / metadata["svg_icon"]
@@ -300,44 +350,51 @@ def create_desktop_entry(product_slug: str, install_path: Path, metadata: Dict[s
         # and usually preferred for env vars.
         sh_candidate = exec_path.with_suffix(".sh")
         if sh_candidate.exists():
-             exec_path = sh_candidate
+            exec_path = sh_candidate
         elif not exec_path.exists():
             log(f"Warning: Launch binary {exec_path} not found.", Colors.YELLOW)
 
     if not icon_path.exists():
-        log(f"Warning: Icon {icon_path} not found, defaulting to generic.", Colors.YELLOW)
+        log(
+            f"Warning: Icon {icon_path} not found, defaulting to generic.",
+            Colors.YELLOW,
+        )
         icon_path_str = "application-x-executable"
     else:
         icon_path_str = str(icon_path)
 
     desktop_filename = f"jb-lite-{product_slug}.desktop"
     desktop_file = APP_DIR / desktop_filename
-    
+
     APP_DIR.mkdir(parents=True, exist_ok=True)
 
     content = f"""[Desktop Entry]
 Version=1.0
 Type=Application
-Name={metadata['name']} ({metadata['version']})
+Name={metadata["name"]} ({metadata["version"]})
 Icon={icon_path_str}
 Exec="{exec_path}" %f
-Comment={metadata['name']}
+Comment={metadata["name"]}
 Categories=Development;IDE;
 Terminal=false
-StartupWMClass={metadata['wm_class']}
+StartupWMClass={metadata["wm_class"]}
 """
-    
+
     desktop_file.write_text(content)
     desktop_file.chmod(desktop_file.stat().st_mode | 0o111)
-    
+
     log(f"Desktop entry created: {desktop_file}", Colors.GREEN)
+
 
 def install_product(product_slug: str, force: bool = False):
     if product_slug not in PRODUCTS:
         error(f"Unknown product: {product_slug}")
 
-    log(f"Checking latest {CURRENT_ARCH} version for {PRODUCTS[product_slug]['name']}...", Colors.BOLD)
-    
+    log(
+        f"Checking latest {CURRENT_ARCH} version for {PRODUCTS[product_slug]['name']}...",
+        Colors.BOLD,
+    )
+
     release = get_latest_linux_release(product_slug)
     if not release:
         error(f"No Linux release found for {product_slug} on {CURRENT_ARCH}.")
@@ -345,7 +402,7 @@ def install_product(product_slug: str, force: bool = False):
     latest_ver = release["version"]
     latest_build = release["build"]
     download_url = release["url"]
-    
+
     # Check current installation
     current = get_installed_info(product_slug)
     if current and not force:
@@ -359,7 +416,7 @@ def install_product(product_slug: str, force: bool = False):
     # Prepare directories
     target_dir = INSTALL_DIR / product_slug
     temp_tar = INSTALL_DIR / f"{product_slug}_temp.tar.gz"
-    
+
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
 
     # Download
@@ -374,25 +431,25 @@ def install_product(product_slug: str, force: bool = False):
     log("Extracting...", Colors.YELLOW)
     try:
         with tarfile.open(temp_tar, "r:gz") as tar:
-            
+
             def is_safe_member(tarinfo):
                 path = Path(tarinfo.name)
                 return not path.is_absolute() and ".." not in path.parts
 
             members = [m for m in tar.getmembers() if is_safe_member(m)]
-            
+
             if not members:
                 error("Archive appears empty or malformed.")
 
             # Finding the root folder inside tar
-            root_member = members[0].name.split('/')[0]
-            
+            root_member = members[0].name.split("/")[0]
+
             tar.extractall(path=INSTALL_DIR, members=members)
-            
+
             extracted_path = INSTALL_DIR / root_member
             if extracted_path != target_dir:
                 extracted_path.rename(target_dir)
-                
+
     except Exception as e:
         error(f"Extraction failed: {e}")
     finally:
@@ -404,14 +461,18 @@ def install_product(product_slug: str, force: bool = False):
     try:
         metadata = parse_product_info(target_dir)
         create_desktop_entry(product_slug, target_dir, metadata)
-        log(f"Successfully installed {metadata['name']} {metadata['version']}!", Colors.GREEN)
+        log(
+            f"Successfully installed {metadata['name']} {metadata['version']}!",
+            Colors.GREEN,
+        )
     except Exception as e:
         log(f"Installation finished, but desktop integration failed: {e}", Colors.RED)
+
 
 def remove_product(product_slug: str):
     target_dir = INSTALL_DIR / product_slug
     desktop_file = APP_DIR / f"jb-lite-{product_slug}.desktop"
-    
+
     if not target_dir.exists() and not desktop_file.exists():
         log(f"{product_slug} is not installed.", Colors.YELLOW)
         return
@@ -419,39 +480,43 @@ def remove_product(product_slug: str):
     if target_dir.exists():
         shutil.rmtree(target_dir)
         log(f"Removed installation directory.", Colors.GREEN)
-    
+
     if desktop_file.exists():
         desktop_file.unlink()
         log(f"Removed desktop entry.", Colors.GREEN)
 
+
 def list_products():
     log(f"Available Products (Arch: {CURRENT_ARCH}):", Colors.BOLD)
-    
+
     # Sort installed first, then alphabetical
     installed_keys = []
     other_keys = []
-    
+
     for key in PRODUCTS:
         if get_installed_info(key):
             installed_keys.append(key)
         else:
             other_keys.append(key)
-            
+
     installed_keys.sort()
     other_keys.sort()
-    
+
     for key in installed_keys:
         info = get_installed_info(key)
-        name = PRODUCTS[key]['name']
-        log(f"  [INSTALLED] {name} ({key}): {Colors.GREEN}{info['version']}{Colors.RESET}")
+        name = PRODUCTS[key]["name"]
+        log(
+            f"  [INSTALLED] {name} ({key}): {Colors.GREEN}{info['version']}{Colors.RESET}"
+        )
 
     for key in other_keys:
-        name = PRODUCTS[key]['name']
+        name = PRODUCTS[key]["name"]
         log(f"  {name} ({key})")
+
 
 def generate_completion(shell: str):
     product_list = " ".join(PRODUCTS.keys())
-    
+
     script = f"""
 # Shell completion for jb-lite
 # 
@@ -488,14 +553,18 @@ complete -F _jb_lite_completion jb-lite
 """
     print(script.strip())
 
+
 # --- CLI Handling ---
+
 
 def main():
     parser = argparse.ArgumentParser(description="Lightweight JetBrains Installer")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     install_parser = subparsers.add_parser("install", help="Install a product")
-    install_parser.add_argument("product", help="Product slug (e.g. intellij-idea-ultimate)")
+    install_parser.add_argument(
+        "product", help="Product slug (e.g. intellij-idea-ultimate)"
+    )
     install_parser.add_argument("--force", action="store_true", help="Force reinstall")
 
     remove_parser = subparsers.add_parser("remove", help="Remove a product")
@@ -504,31 +573,36 @@ def main():
     subparsers.add_parser("update", help="Update all installed products")
     subparsers.add_parser("list", help="List all available products")
 
-    completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")
-    completion_parser.add_argument("--shell", choices=["bash", "zsh"], default="bash", help="Target shell")
+    completion_parser = subparsers.add_parser(
+        "completion", help="Generate shell completion script"
+    )
+    completion_parser.add_argument(
+        "--shell", choices=["bash", "zsh"], default="bash", help="Target shell"
+    )
 
     args = parser.parse_args()
 
     if args.command == "install":
         install_product(args.product, args.force)
-    
+
     elif args.command == "remove":
         remove_product(args.product)
-    
+
     elif args.command == "update":
         log("Checking for updates...", Colors.BOLD)
         for key in PRODUCTS:
             if (INSTALL_DIR / key).exists():
                 install_product(key)
-    
+
     elif args.command == "list":
         list_products()
 
     elif args.command == "completion":
         generate_completion(args.shell)
-        
+
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()
