@@ -25,6 +25,7 @@ import platform
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 import gzip
+import functools
 
 try:
     import brotli
@@ -62,14 +63,16 @@ CACHE_TTL = 86400  # 24 Hours in seconds
 PRODUCTS_URL = "https://data.services.jetbrains.com/products"
 
 
+INTERACTIVE = sys.stderr.isatty
+
+
 class Colors:
     # Check if stderr is a TTY; if not (e.g. systemd/cron), disable colors
-    _enabled = sys.stderr.isatty()
-    GREEN = "\033[92m" if _enabled else ""
-    YELLOW = "\033[93m" if _enabled else ""
-    RED = "\033[91m" if _enabled else ""
-    RESET = "\033[0m" if _enabled else ""
-    BOLD = "\033[1m" if _enabled else ""
+    GREEN = "\033[92m" if INTERACTIVE else ""
+    YELLOW = "\033[93m" if INTERACTIVE else ""
+    RED = "\033[91m" if INTERACTIVE else ""
+    RESET = "\033[0m" if INTERACTIVE else ""
+    BOLD = "\033[1m" if INTERACTIVE else ""
 
 
 def log(msg: str, color: str = Colors.RESET):
@@ -127,6 +130,7 @@ def fetch_data(url, timeout=10):
         return json.loads(data.decode())
 
 
+@functools.cache
 def get_product_data() -> Dict[str, Any]:
     """
     Fetches product data from cache or API.
@@ -201,9 +205,6 @@ def process_product_list(raw_list: List[Dict]) -> Dict[str, Any]:
     return products
 
 
-# Load products immediately for CLI usage
-PRODUCTS = get_product_data()
-
 # --- Core Logic ---
 
 
@@ -211,7 +212,8 @@ def get_latest_linux_release(product_slug: str) -> Optional[Dict[str, Any]]:
     """
     Finds the latest release for a product with a download matching the current architecture.
     """
-    product = PRODUCTS[product_slug]
+
+    product = get_product_data()[product_slug]
     releases = product.get("releases", [])
 
     if not releases:
@@ -295,7 +297,7 @@ def parse_product_info(install_path: Path) -> Dict[str, Any]:
     try:
         data = json.loads(info_path.read_text())
     except json.JSONDecodeError:
-        error(f"Failed to parse product-info.json")
+        error("Failed to parse product-info.json")
 
     # Extract Launch Info
     launch_entries = data.get("launch", [])
@@ -387,11 +389,11 @@ StartupWMClass={metadata["wm_class"]}
 
 
 def install_product(product_slug: str, force: bool = False):
-    if product_slug not in PRODUCTS:
+    if product_slug not in get_product_data():
         error(f"Unknown product: {product_slug}")
 
     log(
-        f"Checking latest {CURRENT_ARCH} version for {PRODUCTS[product_slug]['name']}...",
+        f"Checking latest {CURRENT_ARCH} version for {get_product_data()[product_slug]['name']}...",
         Colors.BOLD,
     )
 
@@ -479,11 +481,11 @@ def remove_product(product_slug: str):
 
     if target_dir.exists():
         shutil.rmtree(target_dir)
-        log(f"Removed installation directory.", Colors.GREEN)
+        log("Removed installation directory.", Colors.GREEN)
 
     if desktop_file.exists():
         desktop_file.unlink()
-        log(f"Removed desktop entry.", Colors.GREEN)
+        log("Removed desktop entry.", Colors.GREEN)
 
 
 def list_products():
@@ -493,7 +495,7 @@ def list_products():
     installed_keys = []
     other_keys = []
 
-    for key in PRODUCTS:
+    for key in get_product_data():
         if get_installed_info(key):
             installed_keys.append(key)
         else:
@@ -504,18 +506,18 @@ def list_products():
 
     for key in installed_keys:
         info = get_installed_info(key)
-        name = PRODUCTS[key]["name"]
+        name = get_product_data()[key]["name"]
         log(
             f"  [INSTALLED] {name} ({key}): {Colors.GREEN}{info['version']}{Colors.RESET}"
         )
 
     for key in other_keys:
-        name = PRODUCTS[key]["name"]
+        name = get_product_data()[key]["name"]
         log(f"  {name} ({key})")
 
 
 def generate_completion(shell: str):
-    product_list = " ".join(PRODUCTS.keys())
+    product_list = " ".join(get_product_data().keys())
 
     script = f"""
 # Shell completion for jb-lite
@@ -590,7 +592,7 @@ def main():
 
     elif args.command == "update":
         log("Checking for updates...", Colors.BOLD)
-        for key in PRODUCTS:
+        for key in get_product_data():
             if (INSTALL_DIR / key).exists():
                 install_product(key)
 
