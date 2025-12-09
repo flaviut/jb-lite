@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Dict, Optional, Any, List
 import gzip
 import functools
+import textwrap
 
 try:
     import brotli
@@ -534,43 +535,42 @@ def list_products():
 
 
 def generate_completion(shell: str):
-    product_list = " ".join(get_product_data().keys())
+    print(
+        textwrap.dedent("""\
+        # Shell completion for jb-lite
+        #
+        # Installation:
+        #   Bash: source <(python3 jb-lite completion --shell bash)
+        #   Zsh:  autoload -U +X bashcompinit && bashcompinit
+        #         source <(python3 jb-lite completion --shell zsh)
 
-    script = f"""
-# Shell completion for jb-lite
-# 
-# Installation:
-#   Bash: source <(python3 jb-lite completion --shell bash)
-#   Zsh:  autoload -U +X bashcompinit && bashcompinit
-#         source <(python3 jb-lite completion --shell zsh)
+        _jb_lite_completion() {{
+            local cur prev opts
+            COMPREPLY=()
+            cur="${{COMP_WORDS[COMP_CWORD]}}"
+            prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+            opts="install update list remove completion"
+            products="$(jb-lite products)"
 
-_jb_lite_completion() {{
-    local cur prev opts
-    COMPREPLY=()
-    cur="${{COMP_WORDS[COMP_CWORD]}}"
-    prev="${{COMP_WORDS[COMP_CWORD-1]}}"
-    opts="install update list remove completion"
-    products="{product_list}"
+            case "${{prev}}" in
+                install|remove)
+                    COMPREPLY=( $(compgen -W "${{products}}" -- ${{cur}}) )
+                    return 0
+                    ;;
+                *)
+                    ;;
+            ac
 
-    case "${{prev}}" in
-        install|remove)
-            COMPREPLY=( $(compgen -W "${{products}}" -- ${{cur}}) )
-            return 0
-            ;;
-        *)
-            ;;
-    esac
+            if [[ ${{cur}} == -* ]]; then
+                COMPREPLY=( $(compgen -W "--help --force" -- ${{cur}}) )
+            else
+                COMPREPLY=( $(compgen -W "${{opts}}" -- ${{cur}}) )
+            fi
+        }}
 
-    if [[ ${{cur}} == -* ]]; then
-        COMPREPLY=( $(compgen -W "--help --force" -- ${{cur}}) )
-    else
-        COMPREPLY=( $(compgen -W "${{opts}}" -- ${{cur}}) )
-    fi
-}}
-
-complete -F _jb_lite_completion jb-lite
-"""
-    print(script.strip())
+        complete -F _jb_lite_completion jb-lite
+        """)
+    )
 
 
 # --- CLI Handling ---
