@@ -63,7 +63,7 @@ CACHE_TTL = 86400  # 24 Hours in seconds
 PRODUCTS_URL = "https://data.services.jetbrains.com/products"
 
 
-INTERACTIVE = sys.stderr.isatty
+INTERACTIVE = os.isatty(sys.stdout.fileno())
 
 
 class Colors:
@@ -77,11 +77,23 @@ class Colors:
 
 def log(msg: str, color: str = Colors.RESET):
     """Prints status messages to stderr to avoid polluting stdout."""
-    print(f"{color}{msg}{Colors.RESET}", file=sys.stderr)
+    if INTERACTIVE:
+        print(f"{color}{msg}{Colors.RESET}", file=sys.stderr)
+
+
+def warning(msg: str):
+    """Prints warning messages to stderr."""
+    if INTERACTIVE:
+        log(f"[WARNING] {msg}", Colors.YELLOW)
+    else:
+        print(f"[WARNING] {msg}", file=sys.stderr)
 
 
 def error(msg: str):
-    log(f"Error: {msg}", Colors.RED)
+    if INTERACTIVE:
+        log(f"[ERROR] {msg}", Colors.RED)
+    else:
+        print(f"[ERROR] {msg}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -272,13 +284,14 @@ def download_file(url: str, dest_path: Path):
                     downloaded += len(buffer)
                     f.write(buffer)
 
-                    if total_size > 0:
+                    if total_size > 0 and INTERACTIVE:
                         percent = downloaded * 100 / total_size
                         sys.stdout.write(
-                            f"\rProgress: [{int(percent)}%] {downloaded // (1024 * 1024)}MB"
+                            f"\rProgress: [{int(percent):3}%] {downloaded // (1024 * 1024)}MB / {total_size // (1024 * 1024)}MB"
                         )
                         sys.stdout.flush()
-            print()
+            if INTERACTIVE:
+                print()
     except Exception as e:
         if dest_path.exists():
             dest_path.unlink()
@@ -320,6 +333,7 @@ def parse_product_info(install_path: Path) -> Dict[str, Any]:
     if not launch_config and CURRENT_ARCH == "amd64":
         for entry in launch_entries:
             if entry.get("os") == "Linux" and "arch" not in entry:
+                # Assume lack of arch means x86_64/amd64
                 launch_config = entry
                 break
 
@@ -354,13 +368,10 @@ def create_desktop_entry(
         if sh_candidate.exists():
             exec_path = sh_candidate
         elif not exec_path.exists():
-            log(f"Warning: Launch binary {exec_path} not found.", Colors.YELLOW)
+            warning(f"Launch binary {exec_path} not found.")
 
     if not icon_path.exists():
-        log(
-            f"Warning: Icon {icon_path} not found, defaulting to generic.",
-            Colors.YELLOW,
-        )
+        warning(f"Icon {icon_path} not found, defaulting to generic application icon.")
         icon_path_str = "application-x-executable"
     else:
         icon_path_str = str(icon_path)
@@ -443,7 +454,7 @@ def install_product(product_slug: str, force: bool = False):
             if not members:
                 error("Archive appears empty or malformed.")
 
-            # Finding the root folder inside tar
+            # Finding the root folder inside tar (e.g., 'idea-IC-242.20224.36')
             root_member = members[0].name.split("/")[0]
 
             tar.extractall(path=INSTALL_DIR, members=members)
@@ -468,7 +479,7 @@ def install_product(product_slug: str, force: bool = False):
             Colors.GREEN,
         )
     except Exception as e:
-        log(f"Installation finished, but desktop integration failed: {e}", Colors.RED)
+        warning(f"Installation finished, but desktop integration failed: {e}")
 
 
 def remove_product(product_slug: str):
@@ -507,13 +518,19 @@ def list_products():
     for key in installed_keys:
         info = get_installed_info(key)
         name = get_product_data()[key]["name"]
-        log(
-            f"  [INSTALLED] {name} ({key}): {Colors.GREEN}{info['version']}{Colors.RESET}"
-        )
+        if INTERACTIVE:
+            print(
+                f"  [INSTALLED] {name} ({key}): {Colors.GREEN}{info['version']}{Colors.RESET}"
+            )
+        else:
+            print(f"{name}\t{key}\t{info['version']}")
 
     for key in other_keys:
         name = get_product_data()[key]["name"]
-        log(f"  {name} ({key})")
+        if INTERACTIVE:
+            print(f"  {name} ({key})")
+        else:
+            print(f"{name}\t{key}")
 
 
 def generate_completion(shell: str):
