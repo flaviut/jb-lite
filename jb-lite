@@ -458,7 +458,7 @@ def install_product(product_slug: str, force: bool = False):
             # Finding the root folder inside tar (e.g., 'idea-IC-242.20224.36')
             root_member = members[0].name.split("/")[0]
 
-            tar.extractall(path=INSTALL_DIR, members=members)
+            tar.extractall(path=INSTALL_DIR, members=members, filter="data")
 
             extracted_path = INSTALL_DIR / root_member
             if extracted_path != target_dir:
@@ -544,29 +544,29 @@ def generate_completion(shell: str):
         #   Zsh:  autoload -U +X bashcompinit && bashcompinit
         #         source <(python3 jb-lite completion --shell zsh)
 
-        _jb_lite_completion() {{
+        _jb_lite_completion() {
             local cur prev opts
             COMPREPLY=()
-            cur="${{COMP_WORDS[COMP_CWORD]}}"
-            prev="${{COMP_WORDS[COMP_CWORD-1]}}"
-            opts="install update list remove completion"
-            products="$(jb-lite products)"
+            cur="${COMP_WORDS[COMP_CWORD]}"
+            prev="${COMP_WORDS[COMP_CWORD-1]}"
+            opts="install update list remove"
+            products=$(jb-lite list | awk 'FS="\t" {printf "%s ", $2}')
 
-            case "${{prev}}" in
+            case "${prev}" in
                 install|remove)
-                    COMPREPLY=( $(compgen -W "${{products}}" -- ${{cur}}) )
+                    COMPREPLY=( $(compgen -W "${products}" -- ${cur}) )
                     return 0
                     ;;
                 *)
                     ;;
-            ac
+            esac
 
-            if [[ ${{cur}} == -* ]]; then
-                COMPREPLY=( $(compgen -W "--help --force" -- ${{cur}}) )
+            if [[ ${cur} == -* ]]; then
+                COMPREPLY=( $(compgen -W "--help --force" -- ${cur}) )
             else
-                COMPREPLY=( $(compgen -W "${{opts}}" -- ${{cur}}) )
+                COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
             fi
-        }}
+        }
 
         complete -F _jb_lite_completion jb-lite
         """)
