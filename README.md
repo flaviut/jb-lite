@@ -2,7 +2,7 @@
 
 ## Features
 
-- Linux on ARM64 support
+- Supports Linux on x86_64 & ARM64
 - Auto completion
 - Not unreasonably bloated
 - Optional auto-update
