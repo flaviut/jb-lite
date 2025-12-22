@@ -546,7 +546,7 @@ def generate_completion(shell: str):
                 _products=(${(@f)"$(jb-lite list | awk -F '\\t' 'NF >= 2 {print $2}')"})  # product slugs
 
                 local curcontext="$curcontext" state line
-                _arguments -C '1:command:->cmd' '2:argument:->arg' '3:argument:->extra' '*::arg:->rest' || return 0
+                _arguments -C '1:command:->cmd' '2:argument:->arg' '3:argument:->extra' '*::arg:->rest' && return 0
 
                 case $state in
                     cmd)
