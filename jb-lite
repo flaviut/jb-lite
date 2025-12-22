@@ -539,7 +539,7 @@ def generate_completion(shell: str):
         completion_script = textwrap.dedent(
             """\
             #compdef jb-lite
-            _jb_lite() {
+            _jb-lite() {
                 local -a _cmds _shells _products
                 _cmds=(install update list remove)
                 _shells=(bash zsh)
@@ -566,7 +566,7 @@ def generate_completion(shell: str):
                 esac
             }
 
-            compdef _jb_lite jb-lite
+            compdef _jb-lite jb-lite
             """
         )
     else:
