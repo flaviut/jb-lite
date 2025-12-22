@@ -539,16 +539,11 @@ def generate_completion(shell: str):
         completion_script = textwrap.dedent(
             """\
             #compdef jb-lite
-            # Zsh completion for jb-lite
-            #
-            # Installation:
-            #   source <(jb-lite completion --shell zsh)
-
             _jb_lite() {
                 local -a _cmds _shells _products
-                _cmds=(install update list remove completion)
+                _cmds=(install update list remove)
                 _shells=(bash zsh)
-                _products=("${(@f)$(jb-lite list | awk -F '\\t' 'NF >= 2 {print $2}')}")  # product slugs
+                _products=(${(@f)"$(jb-lite list | awk -F '\\t' 'NF >= 2 {print $2}')"})  # product slugs
 
                 local curcontext="$curcontext" state line
                 _arguments -C '1:command:->cmd' '2:argument:->arg' '3:argument:->extra' '*::arg:->rest' || return 0
@@ -577,11 +572,6 @@ def generate_completion(shell: str):
     else:
         completion_script = textwrap.dedent(
             """\
-            # Shell completion for jb-lite (bash)
-            #
-            # Installation:
-            #   source <(jb-lite completion --shell bash)
-
             _jb_lite_completion() {
                 local cur prev opts
                 COMPREPLY=()
