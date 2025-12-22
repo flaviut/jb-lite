@@ -32,7 +32,6 @@ source <(jb-lite completion --shell bash)
 **Zsh** Add the following to your `~/.zshrc`:
 
 ```
-autoload -U +X bashcompinit && bashcompinit
 source <(jb-lite completion --shell zsh)
 ```
 

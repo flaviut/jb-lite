@@ -11,6 +11,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
+        package = pkgs.callPackage ./package.nix { };
         treefmtEval = treefmt-nix.lib.evalModule pkgs {
           projectRootFile = "flake.nix";
           programs.nixpkgs-fmt.enable = true;
@@ -20,9 +21,25 @@
         };
       in
       {
-        packages.default = pkgs.callPackage ./package.nix { };
+        packages = {
+          default = package;
+          jb-lite = package;
+        };
+
+        apps.default = {
+          type = "app";
+          program = "${package}/bin/jb-lite";
+        };
+
         formatter = treefmtEval.config.build.wrapper;
         checks.formatting = treefmtEval.config.build.check self;
+
+        devShells.default = pkgs.mkShell {
+          packages = [
+            pkgs.python3
+            treefmtEval.config.build.wrapper
+          ];
+        };
       }
     );
 }
